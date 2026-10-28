@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.env
+kaggle.json
+data/*.zip
+colab_model_artifacts.zip
