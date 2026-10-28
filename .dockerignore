@@ -2,12 +2,8 @@
 .github
 .venv
 venv
-__pycache__
+**/__pycache__
 .pytest_cache
-data
-notebooks
-docs
-tests
+test_api.py
 *.zip
 .env
-kaggle.json

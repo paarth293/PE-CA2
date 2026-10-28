@@ -1,100 +1,67 @@
-# PE-CA2 — California Housing Random Forest API
+# California Housing Price Prediction
 
-This project uses the California housing dataset and stays in the existing repository: https://github.com/paarth293/PE-CA2.
+A simple Random Forest project using the [Kaggle California housing dataset](https://www.kaggle.com/datasets/hosammhmdali/house-price-dataset). The target is `median_house_value` in USD.
 
-The application code can run before the Colab model arrives. It does not generate substitute predictions: `/live` and the API documentation work, while `/health`, `/model-info`, and valid `/predict` requests return HTTP 503 until a compatible model is loaded. After importing the two export files, restart the server or rebuild the Docker image.
+## Project structure
 
-## Dataset and model
+```text
+PE-CA2/
+├── app/
+│   ├── __init__.py
+│   └── main.py
+├── california_housing_rf_model.pkl
+├── california_housing_rf_metadata.json
+├── test_api.py
+├── requirements.txt
+├── Dockerfile
+├── .dockerignore
+├── .gitignore
+├── .github/workflows/ci.yml
+└── README.md
+```
 
-- Latest source: `D:\telegram\archive\housing.csv`, identical to `data/housing.csv`.
-- Dataset: 20,640 rows, 207 missing bedroom values, no duplicates.
-- Target: `median_house_value` in USD; nine predictor columns.
-- Supplied metadata: 200 Random Forest trees, seed 42, scikit-learn 1.6.1.
-- Metadata reports R² 0.8181, MAE 31486.8013, RMSE 48823.4524. These are user-exported Colab results, not independently reproduced results. R² is not classification accuracy.
+The model was exported from Colab with its preprocessing pipeline. Its parameters and reported evaluation metrics are saved in the metadata file. It uses 200 trees and scikit-learn 1.6.1. The model file is losslessly compressed so it fits GitHub's file limit; `joblib.load` reads it directly.
 
-The earlier 545-row `Housing.csv` with target `price` is not used here. Dataset checksum and provenance are in `docs/dataset_validation.json`.
+## Run in VS Code
 
-## Start in VS Code now
-
-Open this folder and run these commands in its PowerShell terminal:
+Use Python 3.11. From this folder in the PowerShell terminal:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest tests/test_api.py -v
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-Open http://127.0.0.1:8000/docs. Endpoints:
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| GET | `/` | API entry point |
-| GET | `/live` | Confirms the API process is running |
-| GET | `/health` | Confirms a compatible model is loaded; otherwise 503 |
-| GET | `/model-info` | Loaded model parameters and reported metrics; otherwise 503 |
-| POST | `/predict` | Predicts `median_house_value`; otherwise 503 |
-
-Use `example_request.json` as the prediction request. Negative room counts or invalid categories return HTTP 422. In a second terminal, check the real HTTP service before importing the model:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/smoke_test.py http://127.0.0.1:8000 --allow-missing-model
-```
-
-The API behavior tests use a deterministic test double solely inside tests. They verify routing, validation, request column ordering, missing-value conversion, and controlled errors. They do not train or evaluate a housing model.
-
-## Import your Colab model later
-
-Copy these files into `models/`:
-
-```text
-models/
-  california_housing_rf_model.pkl
-  california_housing_rf_metadata.json
-```
-
-The `.pkl` must contain the complete fitted preprocessing + RandomForestRegressor pipeline. Its input columns, scikit-learn version, and parameters must match the metadata. Copying only the estimator without its preprocessing is insufficient.
-
-Restart Uvicorn, then run:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/verify_model.py
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pytest -v
-.\.venv\Scripts\python.exe scripts/smoke_test.py http://127.0.0.1:8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-`verify_model.py` and the strict HTTP test fail if no compatible model is loaded. `tests/test_model.py` is marked pending when no `.pkl` exists and runs against the actual export once it is added. Tests do not independently recreate the reported Colab metrics.
+Open http://127.0.0.1:8000/docs. Execute `GET /`, `GET /health`, and `POST /predict`. Use this prediction request:
 
-Keep the actual executed Colab notebook with output as examination evidence. The repository training notebook is an unexecuted reference using the same dataset and 200 trees. Scikit-learn Random Forest uses the CPU even in a Colab GPU runtime.
+```json
+{
+  "longitude": -122.23,
+  "latitude": 37.88,
+  "housing_median_age": 41,
+  "total_rooms": 880,
+  "total_bedrooms": 129,
+  "population": 322,
+  "households": 126,
+  "median_income": 8.3252,
+  "ocean_proximity": "NEAR BAY"
+}
+```
 
-## Docker
+## Run through Docker
 
-Start Docker Desktop with Linux containers. Stop Uvicorn with Ctrl+C to free port 8000.
+Start Docker Desktop and stop the local API with Ctrl+C first.
 
 ```powershell
-docker version
-docker build -t house-price-api:1.0 .
-docker run -d --name house-price-api -p 8000:8000 house-price-api:1.0
-.\.venv\Scripts\python.exe scripts/smoke_test.py http://127.0.0.1:8000 --allow-missing-model
-docker logs house-price-api
+docker build -t house-price-api .
+docker run --rm -p 8000:8000 house-price-api
 ```
 
-The container can be built now because `models/` already exists with metadata. When you add the `.pkl`, remove the old container, rebuild the image, and run it again. Then run the HTTP smoke test **without** `--allow-missing-model` to require actual predictions.
-
-```powershell
-docker stop house-price-api
-docker rm house-price-api
-```
+Open http://127.0.0.1:8000/docs and execute the same endpoints. Save screenshots of the prediction response and terminal for examination proof.
 
 ## GitHub Actions
 
-The workflow contains two visible jobs:
+Pushing to `main` runs `.github/workflows/ci.yml`: install dependencies, test the model/API, build Docker, start the container, and execute the HTTP endpoints. Open the repository's Actions tab to see the result.
 
-1. **code-and-container:** tests API behavior, builds Docker, and checks actual HTTP responses. It can pass before the model is imported and reports that model verification is pending.
-2. **real-model-validation:** starts automatically after the `.pkl` is committed. It requires a compatible real model, tests its predictions, rebuilds Docker, and requires predictions through the container.
-
-A green first job with a skipped second job is not complete model verification. For examination completion, both jobs must run and pass after the real model is pushed.
-
-Keep `origin` pointing to `paarth293/PE-CA2`. After local checks, commit and push to `main`. The workflow also supports Actions → House Price API CI → Run workflow. Do not commit credentials. Save the successful run URL and screenshots.
-
-See `docs/EXAM_STEPS.md` for the submission checklist.
+Keep the executed Colab notebook and runtime screenshot separately as training evidence. Scikit-learn Random Forest uses the CPU even in a Colab GPU runtime.

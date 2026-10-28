@@ -11,75 +11,40 @@ permissions:
   contents: read
 
 jobs:
-  code-and-container:
+  test-and-docker:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      model_available: ${{ steps.artifacts.outputs.available }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-      - name: Check whether Colab model has been imported
-        id: artifacts
-        shell: bash
-        run: |
-          if [ -f models/california_housing_rf_model.pkl ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "### Model verification pending" >> "$GITHUB_STEP_SUMMARY"
-            echo "Import the Colab .pkl and metadata and push again to run real-model validation." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
-      - name: Test API behavior independently of model availability
-        run: python -m pytest tests/test_api.py -v
-      - name: Build Docker image
-        run: docker build -t house-price-api:${{ github.sha }} .
-      - name: Start Docker container
-        run: docker run -d --name house-price-ci -p 8000:8000 house-price-api:${{ github.sha }}
-      - name: Check container startup and HTTP API
-        run: python scripts/smoke_test.py http://127.0.0.1:8000 --allow-missing-model
-      - name: Show container logs
-        if: always()
-        run: docker logs house-price-ci || true
-      - name: Stop container
-        if: always()
-        run: docker rm -f house-price-ci || true
 
-  real-model-validation:
-    needs: code-and-container
-    if: needs.code-and-container.outputs.model_available == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
+
       - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
-      - name: Require and verify actual Colab model
-        run: python scripts/verify_model.py
-      - name: Test actual model predictions
-        run: python -m pytest tests/test_model.py -v
-      - name: Build image with imported model
-        run: docker build -t house-price-model:${{ github.sha }} .
-      - name: Start model container
-        run: docker run -d --name house-price-model-ci -p 8000:8000 house-price-model:${{ github.sha }}
-      - name: Require successful predictions through Docker
-        run: python scripts/smoke_test.py http://127.0.0.1:8000
+        run: pip install -r requirements.txt
+
+      - name: Test saved model and API
+        run: python -m pytest -v
+
+      - name: Build Docker image
+        run: docker build -t house-price-api .
+
+      - name: Start Docker container
+        run: docker run -d --name house-price-api -p 8000:8000 house-price-api
+
+      - name: Execute Docker API endpoints
+        run: |
+          curl --fail --retry 20 --retry-connrefused --retry-all-errors --retry-delay 2 http://127.0.0.1:8000/health
+          curl --fail http://127.0.0.1:8000/
+          curl --fail -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"longitude":-122.23,"latitude":37.88,"housing_median_age":41,"total_rooms":880,"total_bedrooms":129,"population":322,"households":126,"median_income":8.3252,"ocean_proximity":"NEAR BAY"}' > prediction.json
+          python -c "import json; price=json.load(open('prediction.json'))['predicted_median_house_value_usd']; assert price > 0; print('Docker prediction (USD):', price)"
+
       - name: Show container logs
         if: always()
-        run: docker logs house-price-model-ci || true
-      - name: Stop container
+        run: docker logs house-price-api || true
+
+      - name: Stop Docker container
         if: always()
-        run: docker rm -f house-price-model-ci || true
+        run: docker rm -f house-price-api || true

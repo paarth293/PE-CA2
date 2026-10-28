@@ -4,5 +4,4 @@ __pycache__/
 venv/
 .env
 kaggle.json
-data/*.zip
-colab_model_artifacts.zip
+*.zip
