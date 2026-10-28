@@ -1,5 +1,6 @@
 """Real HTTP checks. --allow-missing-model explicitly checks the pending state."""
 import argparse
+from http.client import RemoteDisconnected
 import json
 import math
 from pathlib import Path
@@ -31,7 +32,7 @@ for attempt in range(30):
         status, data = request("/live")
         if status == 200 and data["status"] == "alive":
             break
-    except (URLError, TimeoutError):
+    except (URLError, TimeoutError, ConnectionError, RemoteDisconnected):
         pass
     if attempt == 29:
         raise RuntimeError("API did not become available within the startup timeout.")
